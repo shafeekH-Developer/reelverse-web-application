@@ -1,0 +1,19 @@
+# secrets - never upload these
+.env
+*.env
+
+# python
+venv/
+__pycache__/
+*.pyc
+
+# local database and uploads
+instance/
+*.db
+
+# node
+node_modules/
+dist/
+
+# editor
+.vscode/
