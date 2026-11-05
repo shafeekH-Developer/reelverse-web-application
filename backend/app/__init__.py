@@ -1,6 +1,7 @@
+import os
 from datetime import timedelta
 
-from flask import Flask
+from flask import Flask, request
 
 from app.extensions import (
     db,
@@ -22,8 +23,26 @@ def create_app():
     # Configuration
     # ==========================
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///reelverse.db"
+    # On your computer this stays the local SQLite file. When hosted, set
+    # DATABASE_URL to the PostgreSQL address given by the hosting site.
+    database_url = os.getenv("DATABASE_URL", "").strip()
+
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace(
+            "postgres://", "postgresql://", 1
+        )
+
+    app.config["SQLALCHEMY_DATABASE_URI"] = (
+        database_url or "sqlite:///reelverse.db"
+    )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    if database_url:
+        # Hosted databases close idle connections: check before using one.
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "pool_recycle": 280,
+        }
 
     app.config["JWT_SECRET_KEY"] = app_config.os.getenv(
         "JWT_SECRET_KEY",
@@ -47,6 +66,40 @@ def create_app():
     app.config["MAIL_USERNAME"] = app_config.MAIL_USERNAME
     app.config["MAIL_PASSWORD"] = app_config.MAIL_PASSWORD
     app.config["MAIL_DEFAULT_SENDER"] = app_config.MAIL_DEFAULT_SENDER
+
+    # ==========================
+    # CORS (lets the hosted website call this backend)
+    # ==========================
+    # FRONTEND_ORIGIN holds the website address, for example
+    # https://reelverse.vercel.app (several can be separated by commas).
+
+    allowed_origins = {
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
+
+    for origin in os.getenv("FRONTEND_ORIGIN", "").split(","):
+        origin = origin.strip().rstrip("/")
+
+        if origin:
+            allowed_origins.add(origin)
+
+    @app.after_request
+    def add_cors_headers(response):
+        origin = request.headers.get("Origin", "").rstrip("/")
+
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Authorization, Content-Type"
+            )
+            response.headers["Access-Control-Allow-Methods"] = (
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            )
+            response.headers["Access-Control-Max-Age"] = "86400"
+
+        return response
 
     # ==========================
     # Initialize Extensions

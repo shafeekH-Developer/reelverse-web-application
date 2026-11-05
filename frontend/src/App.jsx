@@ -17,6 +17,15 @@ import VideoPlayer from "./VideoPlayer.jsx";
 import "./index.css";
 import "./theme.css";
 
+// Address of the chat (Socket.IO) server. On your computer this stays
+// http://127.0.0.1:5000. When hosted, set VITE_API_URL (or VITE_SOCKET_URL)
+// to the backend address, for example https://reelverse-api.onrender.com
+const SOCKET_URL = String(
+  import.meta.env.VITE_SOCKET_URL ||
+    import.meta.env.VITE_API_URL ||
+    "http://127.0.0.1:5000"
+).replace(/\/+$/, "");
+
 
 // =====================================================
 // VIDEO CARD
@@ -7419,7 +7428,7 @@ function MessagesPage({ authUser, onLoginNavigate }) {
       return undefined;
     }
 
-    const socket = io("http://127.0.0.1:5000", {
+    const socket = io(SOCKET_URL, {
       auth: {
         token,
       },

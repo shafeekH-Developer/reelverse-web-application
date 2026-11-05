@@ -404,7 +404,39 @@ export default function VideoPlayer({ video }) {
   const draggingRef = useRef(false);
 
   const originalUrl = video.video_url;
-  const renditions = readRenditions(video);
+  // Qualities made by the backend (videos stored on Cloudflare R2) come
+  // from GET /api/videos/<id>/qualities.
+  const [fetchedQualities, setFetchedQualities] = useState(null);
+
+  useEffect(() => {
+    if (
+      !video.id ||
+      video.renditions ||
+      video.qualities ||
+      video.quality_urls
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    fetch(`/api/videos/${video.id}/qualities`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && data && Array.isArray(data.qualities)) {
+          setFetchedQualities(data.qualities);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [video.id, video.renditions, video.qualities, video.quality_urls]);
+
+  const renditions = readRenditions(
+    fetchedQualities ? { qualities: fetchedQualities } : video
+  );
   const canUseCloudinary = isCloudinaryVideo(originalUrl);
 
   const [sourceInfo, setSourceInfo] = useState(null);

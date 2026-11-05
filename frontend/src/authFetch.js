@@ -18,6 +18,12 @@ const ACCESS_KEY = "access_token";
 const REFRESH_KEY = "refresh_token";
 const USER_KEY = "user";
 
+// When the website is hosted, the backend lives at another address.
+// Set VITE_API_URL (for example https://reelverse-api.onrender.com) and every
+// "/api/..." request is sent there. Left empty, nothing changes and the
+// local Vite proxy keeps working.
+const API_BASE = String(import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+
 const LOGIN_URL = "/api/login";
 const REFRESH_URL = "/api/refresh";
 
@@ -31,6 +37,25 @@ const originalFetch =
 window.__reelverseOriginalFetch = originalFetch;
 
 let renewing = null;
+
+
+// Sends the request, pointing "/api/..." at the hosted backend if set.
+function send(input, init) {
+  if (API_BASE) {
+    if (typeof input === "string" && input.startsWith("/api/")) {
+      return originalFetch(API_BASE + input.slice(4), init);
+    }
+
+    if (input instanceof URL && input.pathname.startsWith("/api/")) {
+      return originalFetch(
+        API_BASE + input.pathname.slice(4) + input.search,
+        init
+      );
+    }
+  }
+
+  return originalFetch(input, init);
+}
 
 
 function readStorage(key) {
@@ -103,7 +128,7 @@ function renewAccessToken() {
 
   renewing = (async () => {
     try {
-      const response = await originalFetch(REFRESH_URL, {
+      const response = await send(REFRESH_URL, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${refreshToken}`,
@@ -183,12 +208,12 @@ async function authFetch(input, init) {
 
   // Not an API call (or a Request object): leave it alone.
   if (!url || !isApiUrl(url)) {
-    return originalFetch(input, init);
+    return send(input, init);
   }
 
   // Login: remember the refresh token that comes with it.
   if (url === LOGIN_URL) {
-    const response = await originalFetch(input, init);
+    const response = await send(input, init);
 
     if (response.ok) {
       try {
@@ -209,7 +234,7 @@ async function authFetch(input, init) {
 
   // Requests without a login token are left alone.
   if (!headers.has("Authorization")) {
-    return originalFetch(input, init);
+    return send(input, init);
   }
 
   let token = readStorage(ACCESS_KEY);
@@ -217,7 +242,7 @@ async function authFetch(input, init) {
   // Logged out: nothing to renew, and the old refresh token must go.
   if (!token) {
     removeStorage(REFRESH_KEY);
-    return originalFetch(input, init);
+    return send(input, init);
   }
 
   // Renew before sending when the token is expired or nearly expired.
@@ -233,14 +258,14 @@ async function authFetch(input, init) {
 
       if (!token) {
         // The session ended while renewing.
-        return originalFetch(input, init);
+        return send(input, init);
       }
     }
   }
 
   headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await originalFetch(input, { ...init, headers });
+  const response = await send(input, { ...init, headers });
 
   // The server still says the token expired: renew once and send again.
   if (
@@ -255,7 +280,7 @@ async function authFetch(input, init) {
         `Bearer ${readStorage(ACCESS_KEY)}`
       );
 
-      return originalFetch(input, { ...init, headers });
+      return send(input, { ...init, headers });
     }
   }
 
