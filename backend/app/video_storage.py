@@ -317,6 +317,99 @@ def upload_to_r2(local_path, key, content_type):
     return public_url(key)
 
 
+# ==========================
+# Direct upload (browser sends the video straight to R2)
+# ==========================
+
+# Big videos skip the small backend server completely. The backend only
+# hands out one-time upload links; the browser then sends every part of
+# the file to R2 itself.
+DIRECT_PART_SIZE = 16 * MB
+DIRECT_LINK_SECONDS = 12 * 60 * 60
+DIRECT_MAX_SIZE = 5 * 1024 * MB
+
+
+def start_direct_upload(key, content_type, size):
+    # Returns the upload id and one upload link per part.
+    client = _client()
+    bucket = os.getenv("R2_BUCKET")
+
+    upload = _with_retries(
+        lambda: client.create_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            ContentType=content_type,
+            CacheControl="public, max-age=31536000",
+        ),
+        "Starting the upload",
+    )
+
+    upload_id = upload["UploadId"]
+    part_count = (size + DIRECT_PART_SIZE - 1) // DIRECT_PART_SIZE
+
+    urls = [
+        client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": bucket,
+                "Key": key,
+                "UploadId": upload_id,
+                "PartNumber": number,
+            },
+            ExpiresIn=DIRECT_LINK_SECONDS,
+        )
+        for number in range(1, part_count + 1)
+    ]
+
+    return upload_id, DIRECT_PART_SIZE, urls
+
+
+def finish_direct_upload(key, upload_id, parts):
+    # Joins the uploaded parts into one file. Returns the file size.
+    client = _client()
+    bucket = os.getenv("R2_BUCKET")
+
+    ordered = sorted(
+        (
+            {"ETag": item["ETag"], "PartNumber": int(item["PartNumber"])}
+            for item in parts
+        ),
+        key=lambda item: item["PartNumber"],
+    )
+
+    _with_retries(
+        lambda: client.complete_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={"Parts": ordered},
+        ),
+        "Finishing the upload",
+    )
+
+    head = client.head_object(Bucket=bucket, Key=key)
+
+    return head["ContentLength"]
+
+
+def abort_direct_upload(key, upload_id):
+    try:
+        _client().abort_multipart_upload(
+            Bucket=os.getenv("R2_BUCKET"),
+            Key=key,
+            UploadId=upload_id,
+        )
+    except Exception:
+        pass
+
+
+def delete_r2_object(key):
+    try:
+        _client().delete_object(Bucket=os.getenv("R2_BUCKET"), Key=key)
+    except Exception:
+        pass
+
+
 def delete_r2_prefix(prefix):
     # Deletes every file inside one video folder.
     client = _client()

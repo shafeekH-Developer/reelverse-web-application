@@ -288,4 +288,21 @@ async function authFetch(input, init) {
 }
 
 
+// Lets other code (like the upload progress bar) get a fresh login token.
+window.__reelverseFreshToken = async () => {
+  let token = readStorage(ACCESS_KEY);
+
+  if (
+    token &&
+    secondsLeft(token) < RENEW_BEFORE_SECONDS &&
+    readStorage(REFRESH_KEY)
+  ) {
+    await renewAccessToken();
+    token = readStorage(ACCESS_KEY);
+  }
+
+  return token;
+};
+
+
 window.fetch = authFetch;

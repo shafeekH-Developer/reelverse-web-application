@@ -1293,6 +1293,208 @@ function NotificationsPage({
 // UPLOAD VIDEO PAGE - STEP 1 (UI ONLY)
 // =====================================================
 
+// Sends a form with upload progress (fetch cannot report progress).
+function postWithProgress(path, formData, token, onProgress) {
+  const base = String(import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+  const url = base ? `${base}${path}` : `/api${path}`;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded, event.total);
+      }
+    };
+
+    xhr.onload = () => {
+      let data = {};
+
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        data = {};
+      }
+
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        data,
+      });
+    };
+
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          "Network error while uploading. Check your connection and try again."
+        )
+      );
+
+    xhr.send(formData);
+  });
+}
+
+
+// Videos at or above this size go straight from the browser to R2.
+const DIRECT_UPLOAD_MIN_BYTES = 50 * 1024 * 1024;
+
+const DIRECT_PARALLEL_PARTS = 3;
+const DIRECT_PART_ATTEMPTS = 6;
+
+
+// Sends one part of a big video to R2 and returns its ETag.
+function putPartToR2(url, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("PUT", url);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const etag = xhr.getResponseHeader("ETag");
+
+        if (etag) {
+          resolve(etag);
+        } else {
+          reject(
+            new Error(
+              "Storage did not return the part ID. The R2 CORS setting must expose ETag."
+            )
+          );
+        }
+      } else {
+        reject(new Error(`Storage answered with status ${xhr.status}.`));
+      }
+    };
+
+    xhr.onerror = () =>
+      reject(new Error("Network problem while uploading a part."));
+
+    xhr.send(blob);
+  });
+}
+
+
+async function putPartWithRetries(url, blob, onProgress) {
+  for (let attempt = 1; attempt <= DIRECT_PART_ATTEMPTS; attempt += 1) {
+    try {
+      return await putPartToR2(url, blob, onProgress);
+    } catch (error) {
+      onProgress(0);
+
+      if (attempt === DIRECT_PART_ATTEMPTS) {
+        throw error;
+      }
+
+      // Short internet drops: wait a little longer each time.
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(30000, 1500 * 2 ** attempt))
+      );
+    }
+  }
+
+  return null;
+}
+
+
+// Uploads a big video straight to R2 in parts, with live progress.
+async function uploadVideoDirect(file, getToken, onProgress) {
+  const startResponse = await fetch("/api/videos/direct/start", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${await getToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ filename: file.name, size: file.size }),
+  });
+
+  const start = await startResponse.json().catch(() => ({}));
+
+  if (!startResponse.ok) {
+    throw new Error(start.message || "Could not start the upload.");
+  }
+
+  const { key, upload_id: uploadId, part_size: partSize } = start;
+  const urls = start.part_urls;
+
+  const loadedByPart = new Array(urls.length).fill(0);
+  const parts = new Array(urls.length);
+
+  const report = () => {
+    const loaded = loadedByPart.reduce((sum, value) => sum + value, 0);
+    onProgress(Math.min(loaded, file.size), file.size);
+  };
+
+  let nextIndex = 0;
+  let failure = null;
+
+  const worker = async () => {
+    while (!failure) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= urls.length) {
+        return;
+      }
+
+      const blob = file.slice(
+        index * partSize,
+        Math.min(file.size, (index + 1) * partSize)
+      );
+
+      try {
+        const etag = await putPartWithRetries(urls[index], blob, (loaded) => {
+          loadedByPart[index] = loaded;
+          report();
+        });
+
+        loadedByPart[index] = blob.size;
+        parts[index] = { PartNumber: index + 1, ETag: etag };
+        report();
+      } catch (error) {
+        failure = error;
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(DIRECT_PARALLEL_PARTS, urls.length) },
+      worker
+    )
+  );
+
+  if (failure) {
+    // Tell the server to clean up the unfinished upload.
+    try {
+      await fetch("/api/videos/direct/abort", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${await getToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key, upload_id: uploadId }),
+      });
+    } catch {
+      // Nothing more to do.
+    }
+
+    throw failure;
+  }
+
+  return { key, uploadId, parts };
+}
+
+
 function UploadPage({ authUser, onLoginNavigate }) {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
@@ -1302,7 +1504,25 @@ function UploadPage({ authUser, onLoginNavigate }) {
   const [thumbnailFile, setThumbnailFile] = useState(null);
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadSizes, setUploadSizes] = useState({ loaded: 0, total: 0 });
   const [uploadError, setUploadError] = useState("");
+
+  // Warn before the page is closed while a video is still uploading.
+  useEffect(() => {
+    if (!uploading) {
+      return undefined;
+    }
+
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", warn);
+
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploading]);
 
   if (!authUser) {
     return (
@@ -1370,15 +1590,58 @@ function UploadPage({ authUser, onLoginNavigate }) {
       setUploadError("");
       setMessage("");
 
-      const response = await fetch("/api/videos", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      });
+      setUploadPercent(0);
+      setUploadSizes({ loaded: 0, total: 0 });
 
-      const data = await response.json().catch(() => ({}));
+      const getToken = async () =>
+        (window.__reelverseFreshToken
+          ? await window.__reelverseFreshToken()
+          : null) || localStorage.getItem("access_token") || token;
+
+      const onProgress = (loaded, total) => {
+        setUploadSizes({ loaded, total });
+        setUploadPercent(Math.min(100, Math.round((loaded / total) * 100)));
+      };
+
+      let response;
+
+      if (videoFile.size >= DIRECT_UPLOAD_MIN_BYTES) {
+        // Big video: straight to R2 in parts, then save the details.
+        const sent = await uploadVideoDirect(videoFile, getToken, onProgress);
+
+        setUploadPercent(100);
+
+        const finishForm = new FormData();
+        finishForm.append("title", title.trim());
+        finishForm.append("description", description.trim());
+        finishForm.append("category", category);
+        finishForm.append("key", sent.key);
+        finishForm.append("upload_id", sent.uploadId);
+        finishForm.append("parts", JSON.stringify(sent.parts));
+        finishForm.append("thumbnail", thumbnailFile);
+
+        const finishResponse = await fetch("/api/videos/direct/complete", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${await getToken()}`,
+          },
+          body: finishForm,
+        });
+
+        response = {
+          ok: finishResponse.ok,
+          data: await finishResponse.json().catch(() => ({})),
+        };
+      } else {
+        response = await postWithProgress(
+          "/videos",
+          formData,
+          await getToken(),
+          onProgress
+        );
+      }
+
+      const data = response.data || {};
 
       if (!response.ok) {
         throw new Error(
@@ -1606,8 +1869,55 @@ function UploadPage({ authUser, onLoginNavigate }) {
               cursor: uploading ? "wait" : "pointer",
             }}
           >
-            {uploading ? "Uploading..." : "Upload Video"}
+            {uploading
+              ? uploadPercent >= 100
+                ? "Finishing on the server..."
+                : `Uploading... ${uploadPercent}%`
+              : "Upload Video"}
           </button>
+
+          {uploading && (
+            <div style={{ marginTop: "14px" }}>
+              <div
+                style={{
+                  height: "8px",
+                  borderRadius: "999px",
+                  background: "#2a2438",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${uploadPercent}%`,
+                    height: "100%",
+                    borderRadius: "999px",
+                    background: "linear-gradient(90deg, #7c3aed, #c084fc)",
+                    transition: "width 0.2s ease",
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "12px",
+                  color: "#a9a3bd",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>
+                  {(uploadSizes.loaded / 1048576).toFixed(1)} MB of{" "}
+                  {(uploadSizes.total / 1048576).toFixed(1)} MB
+                </span>
+                <span>
+                  {uploadPercent >= 100
+                    ? "Saving video, please keep this page open"
+                    : `${uploadPercent}%`}
+                </span>
+              </div>
+            </div>
+          )}
         </form>
       </div>
     </div>
