@@ -28,6 +28,55 @@ const SOCKET_URL = String(
 
 
 // =====================================================
+// SHARE HELPERS (links that open the live page)
+// =====================================================
+
+async function copyLinkToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const box = document.createElement("textarea");
+      box.value = text;
+      box.style.position = "fixed";
+      box.style.opacity = "0";
+      document.body.appendChild(box);
+      box.select();
+      const copied = document.execCommand("copy");
+      document.body.removeChild(box);
+      return copied;
+    } catch {
+      return false;
+    }
+  }
+}
+
+
+// Phones open their own share sheet. Computers copy the link.
+// Returns a short message to show to the person.
+async function shareLink({ title, text, url, copiedMessage }) {
+  if (
+    navigator.share &&
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  ) {
+    try {
+      await navigator.share({ title, text, url });
+      return "";
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        return "";
+      }
+    }
+  }
+
+  const copied = await copyLinkToClipboard(url);
+
+  return copied ? copiedMessage : `Copy this link: ${url}`;
+}
+
+
+// =====================================================
 // VIDEO CARD
 // =====================================================
 
@@ -47,6 +96,44 @@ function VideoCard({
 
   // REPORT-1D: Per-video report menu + dialog
   const [reportMenuOpen, setReportMenuOpen] = useState(false);
+
+  // The menu is drawn on top of the page so rows and cards never cut it off.
+  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
+  const menuButtonRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!reportMenuOpen) {
+      return undefined;
+    }
+
+    const close = () => setReportMenuOpen(false);
+
+    const closeOnOutsideClick = (event) => {
+      if (
+        menuRef.current?.contains(event.target) ||
+        menuButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setReportMenuOpen(false);
+    };
+
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("mousedown", closeOnOutsideClick);
+
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+    };
+  }, [reportMenuOpen]);
+
+  // Share link shown in a small message at the bottom of the screen.
+  const [shareNote, setShareNote] = useState("");
+  const shareNoteTimerRef = useRef(null);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
@@ -138,6 +225,30 @@ function VideoCard({
     } finally {
       setDeleteLoading(false);
     }
+  };
+
+  const handleShareFromMenu = async (event) => {
+    event.stopPropagation();
+    setReportMenuOpen(false);
+
+    const message = await shareLink({
+      title: video.title,
+      text: `Watch "${video.title}" by ${video.creator} on ReelVerse`,
+      url: `${window.location.origin}/?v=${video.id}`,
+      copiedMessage: "Video link copied!",
+    });
+
+    if (!message) {
+      return;
+    }
+
+    setShareNote(message);
+
+    if (shareNoteTimerRef.current) {
+      clearTimeout(shareNoteTimerRef.current);
+    }
+
+    shareNoteTimerRef.current = setTimeout(() => setShareNote(""), 2600);
   };
 
   const openReportDialog = (event) => {
@@ -280,10 +391,27 @@ function VideoCard({
         <div style={{ position: "absolute", top: "0", right: "0", zIndex: 5 }}>
           <button
             type="button"
+            ref={menuButtonRef}
             aria-label="Video options"
             title="Video options"
             onClick={(event) => {
               event.stopPropagation();
+
+              const rect = event.currentTarget.getBoundingClientRect();
+              const opensUp = rect.bottom + 170 > window.innerHeight;
+
+              setMenuPosition(
+                opensUp
+                  ? {
+                      bottom: window.innerHeight - rect.top + 6,
+                      right: Math.max(8, window.innerWidth - rect.right),
+                    }
+                  : {
+                      top: rect.bottom + 6,
+                      right: Math.max(8, window.innerWidth - rect.right),
+                    }
+              );
+
               setReportMenuOpen((current) => !current);
             }}
             style={{
@@ -301,13 +429,14 @@ function VideoCard({
             ⋮
           </button>
 
-          {reportMenuOpen && (
+          {reportMenuOpen && createPortal(
             <div
+              ref={menuRef}
               onClick={(event) => event.stopPropagation()}
               style={{
-                position: "absolute",
-                top: "40px",
-                right: 0,
+                position: "fixed",
+                zIndex: 10001,
+                ...menuPosition,
                 minWidth: "150px",
                 padding: "6px",
                 border: "1px solid #30303a",
@@ -334,6 +463,24 @@ function VideoCard({
                 ⚑ Report video
               </button>
 
+              <button
+                type="button"
+                onClick={handleShareFromMenu}
+                style={{
+                  width: "100%",
+                  border: "none",
+                  borderRadius: "7px",
+                  background: "transparent",
+                  color: "#c4a7ff",
+                  padding: "10px 12px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontWeight: "650",
+                }}
+              >
+                🔗 Share video
+              </button>
+
               {isVideoOwner && (
                 <button
                   type="button"
@@ -353,7 +500,8 @@ function VideoCard({
                   🗑 Delete video
                 </button>
               )}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
 
@@ -730,6 +878,31 @@ function VideoCard({
           </form>
         </div>
       )}
+      {shareNote &&
+        createPortal(
+          <div
+            role="status"
+            style={{
+              position: "fixed",
+              left: "50%",
+              bottom: "28px",
+              transform: "translateX(-50%)",
+              zIndex: 10000,
+              maxWidth: "90vw",
+              padding: "12px 20px",
+              borderRadius: "999px",
+              background: "linear-gradient(110deg, #7c3aed, #c026d3)",
+              color: "#ffffff",
+              fontSize: "14px",
+              fontWeight: "700",
+              boxShadow: "0 14px 40px rgba(124, 58, 237, 0.5)",
+              wordBreak: "break-all",
+            }}
+          >
+            {shareNote}
+          </div>,
+          document.body
+        )}
     </article>
   );
 }
@@ -2408,6 +2581,209 @@ function CoverCropModal({ file, busy, onCancel, onConfirm }) {
   );
 }
 
+// =====================================================
+// EMAIL CHANGE: send a code to the new address and check it
+// =====================================================
+
+function EmailVerifyBox({ newEmail, verified, onVerified }) {
+  const [codeSent, setCodeSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => setCooldown((value) => value - 1), 1000);
+
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const callServer = async (path, body) => {
+    const response = await fetch(`/api/users/email-change/${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || data.msg || "Something went wrong.");
+    }
+
+    return data;
+  };
+
+  const sendCode = async () => {
+    if (busy || cooldown > 0) {
+      return;
+    }
+
+    if (!newEmail.includes("@") || !newEmail.includes(".")) {
+      setError("Please enter a valid email address first.");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setError("");
+      setInfo("");
+
+      await callServer("send-code", { email: newEmail });
+
+      setCodeSent(true);
+      setCode("");
+      setCooldown(30);
+      setInfo(`We sent a 6-digit code to ${newEmail}. It expires in 10 minutes.`);
+    } catch (err) {
+      setError(err.message || "Could not send the code.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    if (busy) {
+      return;
+    }
+
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+
+    try {
+      setBusy(true);
+      setError("");
+
+      await callServer("verify", { email: newEmail, code: code.trim() });
+
+      onVerified(newEmail);
+    } catch (err) {
+      setError(err.message || "Could not verify the code.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const smallButton = {
+    padding: "10px 16px",
+    borderRadius: "8px",
+    border: "1px solid #4c3a7a",
+    background: "#2a1d4a",
+    color: "#e4d7ff",
+    fontWeight: "700",
+    fontSize: "13px",
+    cursor: busy ? "wait" : "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  if (verified) {
+    return (
+      <p style={{ ...authSuccessStyle, marginTop: "10px" }}>
+        ✓ New email verified. Press Save Changes to finish.
+      </p>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: "10px",
+        padding: "12px 14px",
+        borderRadius: "10px",
+        border: "1px solid #3c3150",
+        background: "#171220",
+      }}
+    >
+      <p style={{ margin: "0 0 10px", color: "#c4a7ff", fontSize: "13px" }}>
+        To change your email, verify the new address first.
+      </p>
+
+      {!codeSent ? (
+        <button
+          type="button"
+          onClick={sendCode}
+          disabled={busy}
+          style={smallButton}
+        >
+          {busy ? "Sending..." : "Send verification code"}
+        </button>
+      ) : (
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={code}
+            placeholder="6-digit code"
+            onChange={(event) =>
+              setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+            }
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                verifyCode();
+              }
+            }}
+            style={{
+              ...authInputStyle,
+              flex: "1 1 130px",
+              width: "auto",
+              minWidth: "120px",
+              letterSpacing: "4px",
+            }}
+          />
+
+          <button
+            type="button"
+            onClick={verifyCode}
+            disabled={busy}
+            style={smallButton}
+          >
+            {busy ? "Checking..." : "Verify"}
+          </button>
+
+          <button
+            type="button"
+            onClick={sendCode}
+            disabled={busy || cooldown > 0}
+            style={{
+              ...smallButton,
+              background: "transparent",
+              opacity: cooldown > 0 ? 0.6 : 1,
+            }}
+          >
+            {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+          </button>
+        </div>
+      )}
+
+      {info && (
+        <p style={{ margin: "10px 0 0", color: "#a9a3bd", fontSize: "12px" }}>
+          {info}
+        </p>
+      )}
+
+      {error && (
+        <p style={{ margin: "10px 0 0", color: "#ff6b81", fontSize: "13px" }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserUpdate }) {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
@@ -2429,6 +2805,8 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [editUsername, setEditUsername] = useState("");
   const [editEmail, setEditEmail] = useState("");
+  // The new email address that has been checked with a code.
+  const [verifiedNewEmail, setVerifiedNewEmail] = useState("");
   const [editBio, setEditBio] = useState("");
   const [editWebsiteUrl, setEditWebsiteUrl] = useState("");
   const [editYoutubeUrl, setEditYoutubeUrl] = useState("");
@@ -2639,6 +3017,7 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
     setEditInstagramUrl(profile?.instagram_url || "");
     setProfileSaveError("");
     setProfileSaveMessage("");
+    setVerifiedNewEmail("");
     setShowEditProfile(true);
   };
 
@@ -2651,6 +3030,7 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
     setEditInstagramUrl(profile?.instagram_url || "");
     setProfileSaveError("");
     setProfileSaveMessage("");
+    setVerifiedNewEmail("");
     setShowEditProfile(false);
   };
 
@@ -2680,6 +3060,22 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
 
     if (!email) {
       setProfileSaveError("Email cannot be empty.");
+      return;
+    }
+
+    const currentEmail = (
+      profile?.email ||
+      authUser?.email ||
+      ""
+    ).trim().toLowerCase();
+
+    if (
+      email.toLowerCase() !== currentEmail &&
+      verifiedNewEmail !== email.toLowerCase()
+    ) {
+      setProfileSaveError(
+        "Please verify your new email address with the code before saving."
+      );
       return;
     }
 
@@ -2734,6 +3130,7 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
 
       setEditUsername(updatedUser.username || username);
       setEditEmail(updatedUser.email || email);
+      setVerifiedNewEmail("");
       setEditBio(updatedUser.bio || "");
       setEditWebsiteUrl(updatedUser.website_url || "");
       setEditYoutubeUrl(updatedUser.youtube_url || "");
@@ -2757,35 +3154,19 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
       return;
     }
 
-    const profileUrl = `${window.location.origin}/users/${authUser.id}`;
-    const shareData = {
-      title: `${profile?.username || authUser.username || "User"} on ReelVerse`,
-      text: `Check out ${profile?.username || authUser.username || "this creator"}'s profile on ReelVerse.`,
-      url: profileUrl,
-    };
+    const name = profile?.username || authUser.username || "this creator";
 
-    try {
-      setProfileShareMessage("");
+    setProfileShareMessage("");
 
-      if (navigator.share) {
-        await navigator.share(shareData);
-        setProfileShareMessage("Profile shared successfully!");
-      } else {
-        await navigator.clipboard.writeText(profileUrl);
-        setProfileShareMessage("Profile link copied!");
-      }
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        return;
-      }
+    const message = await shareLink({
+      title: `${name} on ReelVerse`,
+      text: `Check out ${name}'s profile on ReelVerse.`,
+      url: `${window.location.origin}/users/${authUser.id}`,
+      copiedMessage: "Profile link copied!",
+    });
 
-      try {
-        await navigator.clipboard.writeText(profileUrl);
-        setProfileShareMessage("Profile link copied!");
-      } catch (copyErr) {
-        console.error("Profile share failed:", copyErr);
-        setProfileShareMessage("Unable to share profile.");
-      }
+    if (message) {
+      setProfileShareMessage(message);
     }
   };
 
@@ -4047,6 +4428,21 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
                 onChange={(event) => setEditEmail(event.target.value)}
                 style={authInputStyle}
               />
+
+              {editEmail.trim() &&
+                editEmail.trim().toLowerCase() !==
+                  (profile?.email || authUser?.email || "")
+                    .trim()
+                    .toLowerCase() && (
+                  <EmailVerifyBox
+                    key={editEmail.trim().toLowerCase()}
+                    newEmail={editEmail.trim().toLowerCase()}
+                    verified={
+                      verifiedNewEmail === editEmail.trim().toLowerCase()
+                    }
+                    onVerified={setVerifiedNewEmail}
+                  />
+                )}
             </div>
           </div>
 
@@ -4594,35 +4990,19 @@ function OtherUserProfilePage({ authUser, videos, openVideo, onLoginNavigate }) 
       return;
     }
 
-    const profileUrl = `${window.location.origin}/users/${profile.id}`;
-    const shareData = {
-      title: `${profile.username || "Creator"} on ReelVerse`,
-      text: `Check out ${profile.username || "this creator"}'s profile on ReelVerse.`,
-      url: profileUrl,
-    };
+    const name = profile.username || "this creator";
 
-    try {
-      setProfileShareMessage("");
+    setProfileShareMessage("");
 
-      if (navigator.share) {
-        await navigator.share(shareData);
-        setProfileShareMessage("Profile shared successfully!");
-      } else {
-        await navigator.clipboard.writeText(profileUrl);
-        setProfileShareMessage("Profile link copied!");
-      }
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        return;
-      }
+    const message = await shareLink({
+      title: `${name} on ReelVerse`,
+      text: `Check out ${name}'s profile on ReelVerse.`,
+      url: `${window.location.origin}/users/${profile.id}`,
+      copiedMessage: "Profile link copied!",
+    });
 
-      try {
-        await navigator.clipboard.writeText(profileUrl);
-        setProfileShareMessage("Profile link copied!");
-      } catch (copyErr) {
-        console.error("Profile share failed:", copyErr);
-        setProfileShareMessage("Unable to share profile.");
-      }
+    if (message) {
+      setProfileShareMessage(message);
     }
   };
 
