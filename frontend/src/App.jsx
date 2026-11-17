@@ -11233,6 +11233,7 @@ function MessagesPage({ authUser, onLoginNavigate }) {
            only the messages (and the inbox list) scroll, like Instagram. */
         .messages-shell {
           height: calc(100vh - 230px) !important;
+          height: calc(100dvh - 230px) !important;
           min-height: 480px !important;
           grid-template-rows: minmax(0, 1fr);
         }
@@ -11257,6 +11258,7 @@ function MessagesPage({ authUser, onLoginNavigate }) {
 
           .rv-page:has(.messages-chat-panel form) .messages-shell {
             height: calc(100vh - 116px) !important;
+            height: calc(100dvh - 116px) !important;
             min-height: 420px !important;
           }
         }
@@ -11275,6 +11277,7 @@ function MessagesPage({ authUser, onLoginNavigate }) {
           .messages-shell {
             grid-template-columns: 1fr !important;
             height: calc(100vh - 150px) !important;
+            height: calc(100dvh - 150px) !important;
             min-height: 0 !important;
             border-radius: 12px !important;
           }
@@ -15878,8 +15881,28 @@ function ReelVerseApp() {
                 }`
               }
             >
-              <span className="nav-icon">
-                ♙
+              <span
+                className="nav-icon"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7" />
+                </svg>
               </span>
 
               My Profile
@@ -16408,9 +16431,11 @@ function ReelVerseApp() {
             background:
               "rgba(0, 0, 0, 0.88)",
             display: "flex",
-            alignItems: "center",
             justifyContent: "center",
-            padding: "30px",
+            // Short screens (phones turned sideways) can scroll the popup
+            // instead of cutting off its top.
+            overflowY: "auto",
+            padding: "clamp(8px, 3vw, 30px)",
           }}
         >
           <div
@@ -16418,8 +16443,10 @@ function ReelVerseApp() {
               event.stopPropagation()
             }
             style={{
+              margin: "auto",
+              flexShrink: 0,
               width:
-                "min(1000px, 95vw)",
+                "min(1000px, 100%)",
               background:
                 "#111116",
               border:

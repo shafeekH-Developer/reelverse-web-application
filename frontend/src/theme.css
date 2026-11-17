@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Outfit:wght@700;800&display=swap');
-
 /* =====================================================================
    ReelVerse cinema theme
    Palette: ink #09090b, panel #121216, line #26262d, text #f4f4f6,
@@ -2360,5 +2358,151 @@ input:focus-visible {
 
   .logo-section h1 {
     font-size: 23px !important;
+  }
+}
+
+
+/* =====================================================
+   RESPONSIVE FIXES (phones, tablets, large screens)
+   - The decorative glow behind each page was wider than a phone,
+     which made the whole page scroll sideways and look zoomed out.
+===================================================== */
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.rv-page {
+  overflow-x: clip;
+}
+
+.rv-page::before {
+  width: min(620px, calc(100% + 40px));
+}
+
+
+/* ----- Phones: bottom bar labels easier to read ----- */
+@media (max-width: 767px) {
+  .sidebar .nav-item {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 359px) {
+  .sidebar .nav-item {
+    font-size: 9px;
+  }
+}
+
+
+/* ----- Chat: message buttons stay on one line ----- */
+.messages-chat-panel button[title*="this message"],
+.messages-chat-panel button[title^="Delete"] {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.messages-chat-panel div:has(> button[title*="this message"]) {
+  flex-wrap: wrap;
+  gap: 4px 12px !important;
+}
+
+
+/* ----- Chat on phones: the open conversation fills the screen ----- */
+@media (max-width: 767px) {
+  body:has(.messages-chat-panel form) {
+    padding-bottom: 0;
+  }
+
+  .content:has(.messages-chat-panel form) {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .rv-page:has(.messages-chat-panel form) {
+    min-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .rv-page:has(.messages-chat-panel form) > div:first-child {
+    display: none !important;
+  }
+
+  .rv-page:has(.messages-chat-panel form) .messages-shell {
+    height: calc(100vh - 150px) !important;
+    height: calc(100dvh - 150px) !important;
+  }
+}
+
+.messages-chat-panel button[title="Reply to this message"] {
+  margin-top: 0 !important;
+}
+
+
+/* ----- Profile cover: never wider than its card (tablets) ----- */
+@media (min-width: 768px) {
+  .rv-pcover {
+    width: calc(100% + 56px);
+    min-width: 0;
+  }
+}
+
+
+/* ----- Video grids: two columns on tablets, more on big screens ----- */
+.video-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+}
+
+@media (max-width: 767px) {
+  .video-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* =====================================================
+   RESPONSIVE PASS 2 (all phones, tablets and screens)
+===================================================== */
+
+/* Phones must not enlarge text on their own */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* iPhones zoom the page when a field is smaller than 16px; keep it still */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Login / sign-up on short screens (phones turned sideways):
+   the About / Contact line moves to the top corner so it never
+   covers the form */
+@media (max-height: 640px) {
+  .rv-af {
+    top: 14px;
+    right: 16px;
+    bottom: auto;
+    left: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    background: none;
+  }
+}
+
+/* Phones turned sideways: smaller header and hero so content fits */
+@media (max-height: 500px) and (orientation: landscape) {
+  .rv-hero,
+  .hero {
+    min-height: 200px !important;
   }
 }
