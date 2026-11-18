@@ -15452,6 +15452,7 @@ function ReelVerseApp() {
             value={navbarSearchText}
             autoComplete="off"
             onFocus={() => setNavbarSearchFocused(true)}
+            onBlur={() => setNavbarSearchFocused(false)}
             onChange={(event) => {
               setNavbarSearchText(event.target.value);
               setNavbarSearchFocused(true);
