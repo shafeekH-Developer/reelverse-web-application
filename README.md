@@ -9,9 +9,9 @@ take up to a minute.)
 
 ## Screenshots
 
-| Home | Home (more videos) |
-|------|--------------------|
-| ![Home](docs/home.png) | ![Home 2](docs/home1.png) |
+| Login page | Home |
+|------------|------|
+| ![Login page](docs/home.png) | ![Home](docs/home1.png) |
 
 | Explore | Video page |
 |---------|------------|
