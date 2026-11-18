@@ -7,11 +7,19 @@ discover, like, comment, save, follow and chat in real time.
 (The backend runs on a free tier and sleeps when idle, so the first load can
 take up to a minute.)
 
-<!-- Add screenshots here, e.g.
-![Home](docs/home.png)
-![Explore](docs/explore.png)
-![Mobile](docs/mobile.png)
--->
+## Screenshots
+
+| Home | Home (more videos) |
+|------|--------------------|
+| ![Home](docs/home.png) | ![Home 2](docs/home1.png) |
+
+| Explore | Video page |
+|---------|------------|
+| ![Explore](docs/explore.png) | ![Video](docs/video.png) |
+
+| Mobile | Mobile |
+|--------|--------|
+| ![Mobile](docs/mobile.jpeg) | ![Mobile 2](docs/mobile2.jpeg) |
 
 ## Features
 
