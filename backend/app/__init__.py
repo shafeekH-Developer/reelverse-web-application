@@ -44,10 +44,13 @@ def create_app():
             "pool_recycle": 280,
         }
 
-    app.config["JWT_SECRET_KEY"] = app_config.os.getenv(
-        "JWT_SECRET_KEY",
-        "reelverse_secret_key"
-    )
+    jwt_secret = app_config.os.getenv("JWT_SECRET_KEY")
+    if not jwt_secret:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. Add it to backend/.env (local) "
+            "or to the Render environment variables (production)."
+        )
+    app.config["JWT_SECRET_KEY"] = jwt_secret
 
     # Short access token, long refresh token. The website renews the
     # access token automatically using the refresh token.
