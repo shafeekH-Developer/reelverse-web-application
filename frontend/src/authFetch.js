@@ -203,6 +203,17 @@ async function sayTokenExpired(response) {
 }
 
 
+async function sayBanned(response) {
+  try {
+    const data = await response.clone().json();
+
+    return data.banned === true;
+  } catch {
+    return false;
+  }
+}
+
+
 async function authFetch(input, init) {
   const url = getUrl(input);
 
@@ -266,6 +277,13 @@ async function authFetch(input, init) {
   headers.set("Authorization", `Bearer ${token}`);
 
   const response = await send(input, { ...init, headers });
+
+  // The account was banned while logged in: end the session at once.
+  if (response.status === 403 && (await sayBanned(response))) {
+    endSession();
+
+    return response;
+  }
 
   // The server still says the token expired: renew once and send again.
   if (

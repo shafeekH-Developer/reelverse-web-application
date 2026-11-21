@@ -13,6 +13,7 @@ import {
 import { io } from "socket.io-client";
 
 import VideoPlayer from "./VideoPlayer.jsx";
+import AdminPage from "./AdminPage.jsx";
 
 import "./index.css";
 import "./theme.css";
@@ -15206,6 +15207,43 @@ function ReelVerseApp() {
   };
 
 
+  // The saved login can be older than the admin flag, so ask the server
+  // once after the page opens. This is what shows the Admin link.
+  useEffect(() => {
+    const token = localStorage.getItem("access_token");
+
+    if (!authUser?.id || !token) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const response = await fetch("/api/profile", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!response.ok || cancelled) {
+          return;
+        }
+
+        const data = await response.json();
+
+        if (Boolean(data.is_admin) !== Boolean(authUser.is_admin)) {
+          updateAuthUser({ is_admin: Boolean(data.is_admin) });
+        }
+      } catch {
+        // Nothing to do: the link simply stays as it is.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id]);
+
+
   // ===================================================
   // CLOSE VIDEO
   // ===================================================
@@ -15933,6 +15971,32 @@ function ReelVerseApp() {
               My Videos
             </NavLink>
 
+
+            {authUser?.is_admin && (
+              <NavLink
+                to="/admin"
+                style={{
+                  textDecoration:
+                    "none",
+                }}
+                className={({
+                  isActive,
+                }) =>
+                  `nav-item ${
+                    isActive
+                      ? "active"
+                      : ""
+                  }`
+                }
+              >
+                <span className="nav-icon">
+                  ◆
+                </span>
+
+                Admin
+              </NavLink>
+            )}
+
           </div>
 
 
@@ -16357,6 +16421,21 @@ function ReelVerseApp() {
                   authUser={authUser}
                   onLoginNavigate={() => navigate("/login")}
                   onUnreadStatusChange={setHasUnreadNotifications}
+                />
+              }
+            />
+
+
+            {/* =================================================
+                ADMIN (owner only)
+            ================================================= */}
+
+            <Route
+              path="/admin"
+              element={
+                <AdminPage
+                  authUser={authUser}
+                  openVideo={openVideo}
                 />
               }
             />
