@@ -79,27 +79,26 @@ def remove_from_cloudinary(public_id, resource_type):
 
 
 # ==========================
-# Delete Video
+# Shared Delete (owner, admin, report limit)
 # ==========================
-@video_delete_bp.route("/videos/<int:video_id>", methods=["DELETE"])
-@jwt_required()
-def delete_video(video_id):
 
-    current_user = int(get_jwt_identity())
+class VideoRemovalError(Exception):
+    # Raised when a video cannot be removed right now. "status" is the
+    # HTTP code to send back and "detail" is optional technical text.
 
-    # Find video
-    video = db.session.get(Video, video_id)
+    def __init__(self, message, status=500, detail=None):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.detail = detail
 
-    if not video:
-        return jsonify({
-            "message": "Video not found."
-        }), 404
 
-    # Check ownership
-    if video.creator_id != current_user:
-        return jsonify({
-            "message": "You are not authorized to delete this video."
-        }), 403
+def remove_video_completely(video):
+    # Deletes a video from cloud storage AND from the database, together
+    # with its comments, likes, bookmarks, history, reports and
+    # notifications. Used by the owner delete, the admin delete and the
+    # automatic delete after too many reports, so all three behave the
+    # same. Commits on success. Raises VideoRemovalError on failure.
 
     # Wait while the other qualities are still being made, because the
     # background work would put new files into the folder after delete.
@@ -108,12 +107,11 @@ def delete_video(video_id):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if now - video.created_at < PROCESSING_WAIT:
-            return jsonify({
-                "message": (
-                    "This video is still being prepared. "
-                    "Please try deleting it again in a few minutes."
-                )
-            }), 409
+            raise VideoRemovalError(
+                "This video is still being prepared. "
+                "Please try deleting it again in a few minutes.",
+                409,
+            )
 
     storage = video.storage_provider or "cloudinary"
 
@@ -146,13 +144,12 @@ def delete_video(video_id):
 
         print(f"[ReelVerse] Could not remove video files: {error}")
 
-        return jsonify({
-            "message": (
-                "The video files could not be removed from cloud "
-                "storage, so the video was not deleted. "
-                "Please try again."
-            )
-        }), 502
+        raise VideoRemovalError(
+            "The video files could not be removed from cloud "
+            "storage, so the video was not deleted. "
+            "Please try again.",
+            502,
+        )
 
     # ==========================
     # Remove the Thumbnail (Cloudinary)
@@ -209,13 +206,55 @@ def delete_video(video_id):
 
         print(f"[ReelVerse] Could not delete video record: {error}")
 
+        raise VideoRemovalError(
+            "Failed to delete video.",
+            500,
+            str(error),
+        )
+
+    return {
+        "storage": storage,
+        "thumbnail_removed": thumbnail_removed,
+    }
+
+
+# ==========================
+# Delete Video (owner)
+# ==========================
+@video_delete_bp.route("/videos/<int:video_id>", methods=["DELETE"])
+@jwt_required()
+def delete_video(video_id):
+
+    current_user = int(get_jwt_identity())
+
+    # Find video
+    video = db.session.get(Video, video_id)
+
+    if not video:
         return jsonify({
-            "message": "Failed to delete video.",
-            "error": str(error)
-        }), 500
+            "message": "Video not found."
+        }), 404
+
+    # Check ownership
+    if video.creator_id != current_user:
+        return jsonify({
+            "message": "You are not authorized to delete this video."
+        }), 403
+
+    try:
+        result = remove_video_completely(video)
+
+    except VideoRemovalError as error:
+
+        body = {"message": error.message}
+
+        if error.detail:
+            body["error"] = error.detail
+
+        return jsonify(body), error.status
 
     return jsonify({
         "message": "Video deleted successfully!",
-        "storage": storage,
-        "thumbnail_removed": thumbnail_removed
+        "storage": result["storage"],
+        "thumbnail_removed": result["thumbnail_removed"]
     }), 200

@@ -6,6 +6,7 @@ from app.extensions import db
 from app.models.video import Video
 from app.models.user import User
 from app.models.like import Like
+from app.visibility import requester_is_admin, visible_videos_filter
 
 
 video_read_bp = Blueprint("video_read", __name__)
@@ -17,7 +18,10 @@ video_read_bp = Blueprint("video_read", __name__)
 @video_read_bp.route("/videos/<int:video_id>/view", methods=["POST"])
 def add_view(video_id):
 
-    video = Video.query.get(video_id)
+    video = Video.query.filter(
+        Video.id == video_id,
+        visible_videos_filter()
+    ).first()
 
     if not video:
         return jsonify({
@@ -52,9 +56,13 @@ def get_all_videos():
     if limit > 50:
         limit = 50
 
-    total_videos = Video.query.count()
+    total_videos = Video.query.filter(
+        visible_videos_filter()
+    ).count()
 
-    videos = Video.query.order_by(
+    videos = Video.query.filter(
+        visible_videos_filter()
+    ).order_by(
         Video.created_at.desc()
     ).paginate(
         page=page,
@@ -139,6 +147,7 @@ def search_videos():
             User.id == Video.creator_id
         )
         .filter(
+            visible_videos_filter(),
             or_(
                 Video.title.ilike(
                     f"%{keyword}%"
@@ -210,7 +219,9 @@ def search_suggestions():
         type=str
     ).strip()
 
-    videos = Video.query.all()
+    videos = Video.query.filter(
+        visible_videos_filter()
+    ).all()
 
     suggestion_candidates = []
 
@@ -364,7 +375,8 @@ def search_suggestions():
 def videos_by_category(category):
 
     videos = Video.query.filter(
-        Video.category.ilike(category)
+        Video.category.ilike(category),
+        visible_videos_filter()
     ).all()
 
     video_list = []
@@ -412,6 +424,13 @@ def videos_by_category(category):
 def get_single_video(video_id):
 
     video = Video.query.get(video_id)
+
+    # Videos of banned users are hidden from everyone except the admin.
+    if video and not requester_is_admin():
+        creator_row = User.query.get(video.creator_id)
+
+        if creator_row and creator_row.is_banned:
+            video = None
 
     if not video:
         return jsonify({
@@ -504,7 +523,9 @@ def my_videos():
 )
 def trending_videos():
 
-    videos = Video.query.all()
+    videos = Video.query.filter(
+        visible_videos_filter()
+    ).all()
 
     trending = []
 

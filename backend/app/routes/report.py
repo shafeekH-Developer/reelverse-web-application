@@ -5,11 +5,10 @@ from app.extensions import db
 
 from app.models.report import Report
 from app.models.video import Video
-from app.models.like import Like
-from app.models.comment import Comment, CommentLike
-from app.models.bookmark import Bookmark
-from app.models.history import History
-from app.models.notification import Notification
+from app.routes.video_delete import (
+    VideoRemovalError,
+    remove_video_completely,
+)
 
 
 report_bp = Blueprint("report", __name__)
@@ -19,90 +18,6 @@ report_bp = Blueprint("report", __name__)
 # Report Limit
 # ==========================
 REPORT_DELETE_THRESHOLD = 1000
-
-
-# ==========================
-# Delete Video + Related Data
-# ==========================
-def delete_reported_video(video):
-
-    video_id = video.id
-
-    # --------------------------
-    # Delete Comment Likes
-    # --------------------------
-    comment_ids = [
-        comment.id
-        for comment in Comment.query.filter_by(
-            video_id=video_id
-        ).all()
-    ]
-
-    if comment_ids:
-        CommentLike.query.filter(
-            CommentLike.comment_id.in_(comment_ids)
-        ).delete(
-            synchronize_session=False
-        )
-
-    # --------------------------
-    # Delete Comments
-    # --------------------------
-    Comment.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Likes
-    # --------------------------
-    Like.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Bookmarks
-    # --------------------------
-    Bookmark.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Watch History
-    # --------------------------
-    History.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Notifications
-    # --------------------------
-    Notification.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Reports
-    # --------------------------
-    Report.query.filter_by(
-        video_id=video_id
-    ).delete(
-        synchronize_session=False
-    )
-
-    # --------------------------
-    # Delete Video
-    # --------------------------
-    db.session.delete(video)
 
 
 # ==========================
@@ -171,9 +86,9 @@ def report_video(video_id):
 
         db.session.add(new_report)
 
-        # Flush makes the new report visible to
-        # the count without committing yet.
-        db.session.flush()
+        # Save the report first, so it is never lost even if the
+        # automatic delete below cannot finish.
+        db.session.commit()
 
         total_reports = Report.query.filter_by(
             video_id=video_id
@@ -182,27 +97,36 @@ def report_video(video_id):
         # ==========================
         # 1000 Reports = Delete Video
         # ==========================
+        # Uses the same delete as the owner and the admin, so the files
+        # in R2 / Cloudinary are removed too (not only the database rows).
         if total_reports >= REPORT_DELETE_THRESHOLD:
 
             deleted_video_id = video.id
 
-            delete_reported_video(video)
+            try:
 
-            db.session.commit()
+                remove_video_completely(video)
 
-            return jsonify({
-                "message":
-                    "Video removed after reaching "
-                    "the report limit.",
-                "video_id": deleted_video_id,
-                "removed": True,
-                "report_threshold":
-                    REPORT_DELETE_THRESHOLD
-            }), 200
+                return jsonify({
+                    "message":
+                        "Video removed after reaching "
+                        "the report limit.",
+                    "video_id": deleted_video_id,
+                    "removed": True,
+                    "report_threshold":
+                        REPORT_DELETE_THRESHOLD
+                }), 200
+
+            except VideoRemovalError as removal_error:
+
+                # The report counts. The video stays and the admin can
+                # remove it from the Admin page.
+                print(
+                    "[ReelVerse] Auto-delete skipped: "
+                    f"{removal_error.message}"
+                )
 
         # Normal report
-        db.session.commit()
-
         return jsonify({
             "message": "Video reported successfully.",
             "video_id": video_id,

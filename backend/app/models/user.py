@@ -83,3 +83,25 @@ class User(db.Model):
         db.DateTime,
         server_default=db.func.now()
     )
+
+    # ==========================
+    # Moderation
+    # ==========================
+
+    # The site owner. Only an admin can open the Admin page.
+    # Set it once with SQL (see the setup steps), never from the website.
+    is_admin = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false()
+    )
+
+    # A banned user cannot log in, and their videos and profile are hidden.
+    # Nothing is deleted, so the ban can be undone.
+    is_banned = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false()
+    )

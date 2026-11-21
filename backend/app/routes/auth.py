@@ -774,6 +774,19 @@ def login():
             "message": "Invalid username/email or password."
         }), 401
     # ==========================
+    # Banned Accounts Cannot Log In
+    # ==========================
+    # Checked after the password, so the message is only shown to the
+    # real owner of the account.
+    if user.is_banned:
+        return jsonify({
+            "message": (
+                "This account has been suspended for breaking "
+                "the ReelVerse rules."
+            ),
+            "banned": True
+        }), 403
+    # ==========================
     # Create Access Token
     # ==========================
     access_token = create_access_token(
@@ -800,7 +813,8 @@ def login():
                 else None
             ),
             "bio": user.bio,
-            "profile_photo_url": user.profile_photo_url
+            "profile_photo_url": user.profile_photo_url,
+            "is_admin": bool(user.is_admin)
         }
     }), 200
 # ==========================
@@ -818,6 +832,12 @@ def refresh_access_token():
         return jsonify({
             "message": "User not found."
         }), 401
+
+    if user.is_banned:
+        return jsonify({
+            "message": "This account has been suspended.",
+            "banned": True
+        }), 403
 
     return jsonify({
         "access_token": create_access_token(
@@ -845,5 +865,6 @@ def profile():
         "username": user.username,
         "email": user.email,
         "bio": user.bio,
-        "profile_photo_url": user.profile_photo_url
+        "profile_photo_url": user.profile_photo_url,
+        "is_admin": bool(user.is_admin)
     }), 200

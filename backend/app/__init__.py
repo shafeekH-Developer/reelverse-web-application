@@ -1,7 +1,8 @@
 import os
 from datetime import timedelta
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
+from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
 from app.extensions import (
     db,
@@ -105,6 +106,49 @@ def create_app():
         return response
 
     # ==========================
+    # Banned Users Are Locked Out Immediately
+    # ==========================
+    # A banned user may still hold a login token that is valid for up to
+    # an hour. This check refuses every request that uses such a token,
+    # so a ban works at once instead of after the token expires.
+
+    @app.before_request
+    def block_banned_users():
+
+        if request.method == "OPTIONS":
+            return None
+
+        if not request.headers.get("Authorization"):
+            return None
+
+        try:
+            verify_jwt_in_request(optional=True)
+            identity = get_jwt_identity()
+        except Exception:
+            # Wrong or expired token: the route reports that itself.
+            return None
+
+        if not identity:
+            return None
+
+        from app.models.user import User
+
+        row = db.session.query(User.is_banned).filter(
+            User.id == int(identity)
+        ).first()
+
+        if row and row[0]:
+            return jsonify({
+                "message": (
+                    "This account has been suspended for breaking "
+                    "the ReelVerse rules."
+                ),
+                "banned": True
+            }), 403
+
+        return None
+
+    # ==========================
     # Initialize Extensions
     # ==========================
 
@@ -154,6 +198,7 @@ def create_app():
     from app.routes.message import message_bp
     from app.routes.search_history import search_history_bp
     from app.routes.report import report_bp
+    from app.routes.admin import admin_bp
 
     from app.routes.profile import profile_bp
     from app.routes.profile_update import profile_update_bp
@@ -183,6 +228,7 @@ def create_app():
     app.register_blueprint(message_bp)
     app.register_blueprint(search_history_bp)
     app.register_blueprint(report_bp)
+    app.register_blueprint(admin_bp)
 
     app.register_blueprint(profile_bp)
     app.register_blueprint(profile_update_bp)
