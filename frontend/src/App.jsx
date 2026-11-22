@@ -2896,7 +2896,7 @@ function ProfilePage({ authUser, videos, openVideo, onLoginNavigate, onAuthUserU
         );
 
         setEditUsername(profileData.username || "");
-        setEditEmail(profileData.email || "");
+        setEditEmail(profileData.email || authUser?.email || "");
         setEditBio(profileData.bio || "");
         setEditWebsiteUrl(profileData.website_url || "");
         setEditYoutubeUrl(profileData.youtube_url || "");
@@ -5250,15 +5250,17 @@ function OtherUserProfilePage({ authUser, videos, openVideo, onLoginNavigate }) 
               {profile.username}
             </h2>
 
-            <p
-              style={{
-                margin: "7px 0 0",
-                color: "#888894",
-                fontSize: "14px",
-              }}
-            >
-              {profile.email}
-            </p>
+            {profile.email && (
+              <p
+                style={{
+                  margin: "7px 0 0",
+                  color: "#888894",
+                  fontSize: "14px",
+                }}
+              >
+                {profile.email}
+              </p>
+            )}
 
             {profile.bio && (
               <p style={{ margin: "12px 0 0", color: "#cfcfd7", fontSize: "14px", lineHeight: "1.6", maxWidth: "620px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>

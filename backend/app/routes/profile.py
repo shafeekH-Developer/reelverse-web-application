@@ -4,6 +4,7 @@ from app.models.user import User
 from app.models.video import Video
 from app.models.like import Like
 from app.models.follow import Follow
+from app.visibility import requester_is_admin
 
 
 profile_bp = Blueprint("profile", __name__)
@@ -18,6 +19,12 @@ def public_profile(user_id):
     user = User.query.get(user_id)
 
     if not user:
+        return jsonify({
+            "message": "User not found."
+        }), 404
+
+    # A banned user's profile is hidden from everyone except the admin.
+    if user.is_banned and not requester_is_admin():
         return jsonify({
             "message": "User not found."
         }), 404
@@ -67,10 +74,12 @@ def public_profile(user_id):
     # ==========================
     # Final Profile Response
     # ==========================
+    # The email is NOT sent here: this page is public, so anyone could
+    # read it. A person sees their own email from their saved login
+    # (and in Edit Profile), and the admin sees it in the Admin page.
     return jsonify({
         "id": user.id,
         "username": user.username,
-        "email": user.email,
         "bio": user.bio,
         "profile_photo_url": user.profile_photo_url,
 
